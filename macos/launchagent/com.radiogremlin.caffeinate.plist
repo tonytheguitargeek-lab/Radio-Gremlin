@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Radio Gremlin (optional): keep the Mac from idle/system sleep while logged in, so the bot keeps running.
+     Installed by macos/install-macos-apps.sh when the sleep-prevention option is used. To remove: launchctl unload the installed copy, then delete it. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.radiogremlin.caffeinate</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/caffeinate</string>
+    <string>-i</string>
+    <string>-s</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+</dict>
+</plist>

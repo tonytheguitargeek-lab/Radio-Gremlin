@@ -1,0 +1,148 @@
+diff --git a/mesh_bot.py b/mesh_bot.py
+index 69428d9..89732ea 100755
+--- a/mesh_bot.py
++++ b/mesh_bot.py
+@@ -1,6 +1,8 @@
+ #!/usr/bin/env python3
+ # Meshtastic Autoresponder MESH Bot
+ # K7MHI Kelly Keeton 2025
++# Modified for Radio Gremlin by Bad Audio Guy, November 2026 (GPLv3). Changes are marked
++# "Radio Gremlin modification"; see https://github.com/SpudGunMan/meshing-around for the original.
+ try:
+     from pubsub import pub
+ except ImportError:
+@@ -10,7 +12,7 @@ except ImportError:
+ import asyncio
+ import time # for sleep, get some when you can :)
+ import random
+-from datetime import datetime
++from datetime import datetime as gremlin_datetime  # Radio Gremlin modification: avoid name clash
+ from modules.log import logger, CustomFormatter, msgLogger, getPrettyTime
+ import modules.settings as my_settings
+ from modules.system import *
+@@ -2147,6 +2149,36 @@ def onReceive(packet, interface):
+     if not isinstance(decoded, dict):
+         decoded = {}
+ 
++    # Radio Gremlin modification (Nov 2026): MQTT passive listener protection.
++    # Text messages that arrived via MQTT are logged but never answered by the bot.
++    transport = str(
++        packet.get('transport_mechanism')
++        or packet.get('transportMechanism')
++        or decoded.get('transport_mechanism')
++        or decoded.get('transportMechanism')
++        or ''
++    ).lower()
++
++    mqtt_received = (
++        packet.get('viaMqtt', False)
++        or decoded.get('viaMqtt', False)
++        or 'mqtt' in transport
++    )
++
++    if mqtt_received and decoded.get('portnum') == 'TEXT_MESSAGE_APP':
++        sender = packet.get("fromId")
++        if not sender:
++            number = packet.get("from")
++            sender = (
++                f"!{number:08x}"
++                if isinstance(number, int)
++                else "UNKNOWN"
++            )
++        logger.debug(
++            f"Gremlin: MQTT passive RX from {sender} - no reply"
++        )
++        return
++
+     # extract interface details from inbound packet
+     rxType = type(interface).__name__
+ 
+@@ -2470,9 +2502,9 @@ def onReceive(packet, interface):
+ 
+                     # ignore the message but add it to the message history list
+                     if my_settings.zuluTime:
+-                        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
++                        timestamp = gremlin_datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                     else:
+-                        timestamp = datetime.now().strftime("%Y-%m-%d %I:%M:%S%p")
++                        timestamp = gremlin_datetime.now().strftime("%Y-%m-%d %I:%M:%S%p")
+ 
+                     # trim the history list if it exceeds max_history
+                     if len(msg_history) >= my_settings.MAX_MSG_HISTORY:
+@@ -2551,6 +2583,9 @@ def onReceive(packet, interface):
+ async def start_rx():
+     # Start the receive subscriber using pubsub via meshtastic library
+     pub.subscribe(onReceive, 'meshtastic.receive')
++    # Radio Gremlin modification (Nov 2026): start the read-only Mesh Command API
++    import mesh_command
++    mesh_command.start()
+     pub.subscribe(onDisconnect, 'meshtastic.connection.lost')
+     logger.debug("System: RX Subscriber started")
+     # here we go loopty loo
+diff --git a/modules/system.py b/modules/system.py
+index 0413253..5fe6cd0 100644
+--- a/modules/system.py
++++ b/modules/system.py
+@@ -1,5 +1,8 @@
++import pickle  # Radio Gremlin modification (Nov 2026): needed by the leaderboard save/load below
+ # helper functions and init for system related tasks
+ # K7MHI Kelly Keeton 2024
++# Modified for Radio Gremlin by Bad Audio Guy, November 2026 (GPLv3). Changes are marked
++# "Radio Gremlin modification"; see https://github.com/SpudGunMan/meshing-around for the original.
+ 
+ import meshtastic.serial_interface #pip install meshtastic or use launch.sh for venv
+ import meshtastic.tcp_interface
+@@ -1403,7 +1406,12 @@ def handleAlertBroadcast(deviceID=1):
+ def onDisconnect(interface):
+     # Handle disconnection of the interface
+     logger.warning(f"System: Abrupt Disconnection of Interface detected, attempting reconnect...")
+-    interface.close()
++    # Radio Gremlin modification (Nov 2026): flag this interface for the watchdog to retry,
++    # instead of closing it outright
++    for i in range(1, 10):
++        if globals().get(f'interface{i}') is interface:
++            globals()[f'retry_int{i}'] = True
++            break
+ 
+ # Telemetry Functions
+ localTelemetryData = {}
+@@ -2333,7 +2341,7 @@ async def retry_interface(nodeID):
+     global retry_int1, retry_int2, retry_int3, retry_int4, retry_int5, retry_int6, retry_int7, retry_int8, retry_int9
+     global max_retry_count1, max_retry_count2, max_retry_count3, max_retry_count4, max_retry_count5, max_retry_count6, max_retry_count7, max_retry_count8, max_retry_count9
+     interface = globals()[f'interface{nodeID}']
+-    retry_int = globals()[f'retry_int{nodeID}']
++    retry_int = True  # Radio Gremlin modification (Nov 2026): always retry a flagged interface
+ 
+     if dont_retry_disconnect:
+         logger.critical(f"System: dont_retry_disconnect is set, not retrying interface{nodeID}")
+@@ -2349,9 +2357,10 @@ async def retry_interface(nodeID):
+         except Exception as e:
+             logger.error(f"System: closing interface{nodeID}: {e}")
+ 
+-    if globals()[f'max_retry_count{nodeID}'] == 0:
+-        logger.critical(f"System: Max retry count reached for interface{nodeID}")
+-        exit_handler()
++    # Radio Gremlin modification (Nov 2026): keep retrying instead of exiting at the max retry count
++    if globals()[f'max_retry_count{nodeID}'] <= 0:
++        logger.warning(f"System: Interface{nodeID} still offline, continuing retries")
++        globals()[f'max_retry_count{nodeID}'] = interface_retry_count
+ 
+     await asyncio.sleep(15)
+ 
+@@ -2508,6 +2517,7 @@ async def watchdog():
+                 except Exception as e:
+                     logger.error(f"System: communicating with interface{i}, trying to reconnect: {e}")
+                     globals()[f'retry_int{i}'] = True
++                    retry_int = True
+ 
+                 if not retry_int and int_enabled:
+                     if sentry_enabled:
+@@ -2523,7 +2533,7 @@ async def watchdog():
+                         logger.debug(intData + f" Firmware:{firmware}")
+                         localTelemetryData[0][f'lastAlert{i}'] = intData
+ 
+-            if retry_int and int_enabled:
++            if globals().get(f'retry_int{i}') and int_enabled:
+                 try:
+                     await retry_interface(i)
+                 except Exception as e:

@@ -1,0 +1,18 @@
+# Never commit secrets, live data or local builds
+firmware/**/secrets.h
+secrets.h
+gremlin.ini
+config.ini
+*.db
+*.db-journal
+*.log
+*.log.*
+*.pid
+*.lock
+venv/
+.venv/
+__pycache__/
+*.pyc
+build/
+*.app/
+.DS_Store
