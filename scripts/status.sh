@@ -10,11 +10,13 @@ show watchdog "Gremlin Watchdog"
 show gremlin "Radio Gremlin bot"
 show observatory "Mesh Observatory"
 
-radio="$(rg_setting radio_host 2>/dev/null):$(rg_setting radio_port 2>/dev/null)"
+radio="$(cd "$RG_DIR" && "$RG_PY" -c 'import gremlin_settings as g; print(g.radio_description(g.load()))')"
 api="$(rg_setting api_url 2>/dev/null)"
-if pid="$(rg_pid gremlin)" && lsof -nP -a -p "$pid" -iTCP@"$radio" -sTCP:ESTABLISHED >/dev/null 2>&1; then
-  printf "%-18s CONNECTED (%s)\n" "Radio TCP" "$radio"
+
+if (cd "$RG_DIR" && "$RG_PY" -c 'import gremlin_settings as g; raise SystemExit(0 if g.current_radio_connected() else 1)'); then
+    printf "%-18s CONNECTED (%s)\n" "Radio Link" "$radio"
 else
-  printf "%-18s not connected (%s)\n" "Radio TCP" "$radio"
+    printf "%-18s not connected (%s)\n" "Radio Link" "$radio"
 fi
+
 if curl -fsS -m 3 "$api/status" >/dev/null 2>&1; then printf "%-18s ONLINE (%s)\n" "Mesh Command API" "$api"; else printf "%-18s offline (%s)\n" "Mesh Command API" "$api"; fi

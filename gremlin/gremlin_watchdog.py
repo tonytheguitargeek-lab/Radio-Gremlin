@@ -33,9 +33,15 @@ PING = shutil.which("ping") or "/sbin/ping"
 # ping's -W is milliseconds on macOS/BSD and seconds on Linux
 PING_WAIT = ["-W", "1000"] if sys.platform == "darwin" else ["-W", "1"]
 
-if not RADIO:
-    raise SystemExit("No radio address: set [interface] type = tcp and hostname in config.ini "
-                     "(or [radio] host in gremlin.ini)")
+if SETTINGS.radio_type not in ("tcp", "serial"):
+    raise SystemExit("Unsupported radio interface type")
+
+if SETTINGS.radio_type == "tcp" and not RADIO:
+    raise SystemExit("No TCP radio address configured")
+
+if SETTINGS.radio_type == "serial" and not SETTINGS.serial_port:
+    raise SystemExit("No USB serial port configured")
+
 running = True
 bot = None
 
@@ -91,29 +97,12 @@ def start_bot():
 def connected():
     if bot is None or bot.poll() is not None:
         return False
-    try:
-        result = subprocess.run(
-            [LSOF, "-nP", "-a",
-             "-p", str(bot.pid),
-             f"-iTCP@{RADIO}:{PORT}",
-             "-sTCP:ESTABLISHED"],
-            capture_output=True, text=True, timeout=5
-        )
-        return result.returncode == 0 and "ESTABLISHED" in result.stdout
-    except Exception:
-        return False
+    return gremlin_settings.radio_connected(SETTINGS, bot.pid)
+
 
 def reachable():
-    try:
-        result = subprocess.run(
-            [PING, "-c", "1", *PING_WAIT, RADIO],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=3
-        )
-        return result.returncode == 0
-    except Exception:
-        return False
+    return gremlin_settings.radio_reachable(SETTINGS)
+
 
 def pause(seconds):
     end = time.monotonic() + seconds
@@ -127,7 +116,7 @@ errors = re.compile(
     re.IGNORECASE
 )
 
-log("GREMLIN WATCHDOG V1.0 ONLINE")
+log("GREMLIN WATCHDOG V1.1 ONLINE")
 
 try:
     while running:
@@ -161,15 +150,15 @@ try:
             if connected():
                 failures = 0
                 if not healthy:
-                    log("TCP connection healthy")
+                    log("Radio link healthy")
                     healthy = True
             else:
                 failures += 1
                 healthy = False
-                log(f"TCP connection missing: {failures}/3")
+                log(f"Radio link missing: {failures}/3")
 
             if failures >= 3:
-                log("Sustained TCP failure - recovery required")
+                log("Sustained radio link failure - recovery required")
                 break
 
             pause(CHECK)

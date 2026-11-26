@@ -67,7 +67,14 @@ def packet_route(packet):
     ).upper()
 
     rssi = packet.get("rxRssi")
-    is_rf = isinstance(rssi, (int, float)) and rssi < 0
+    is_rf = (
+        transport == "TRANSPORT_LORA"
+        or (
+            transport == "UNKNOWN"
+            and isinstance(rssi, (int, float))
+            and rssi < 0
+        )
+    )
 
     hops = None
 
@@ -130,7 +137,11 @@ def receive_packet(packet, interface):
             rssi = packet.get("rxRssi")
             snr = packet.get("rxSnr")
 
-            if rssi is not None and rssi < 0:
+            route = packet_route(packet)
+            rssi = rssi if isinstance(rssi, (int, float)) and rssi < 0 else None
+            snr = snr if isinstance(snr, (int, float)) else None
+
+            if route["route"] in ("DIRECT", "RELAYED", "RF UNKNOWN"):
 
                 state["rf_packets"] += 1
 
@@ -300,10 +311,12 @@ def record_traffic(packet, interface):
         rssi = packet.get("rxRssi")
         snr = packet.get("rxSnr")
 
-        is_rf = (
-            isinstance(rssi, (int, float))
-            and rssi < 0
+        route = packet_route(packet)
+        is_rf = route["route"] in (
+            "DIRECT", "RELAYED", "RF UNKNOWN"
         )
+        rssi = rssi if isinstance(rssi, (int, float)) and rssi < 0 else None
+        snr = snr if isinstance(snr, (int, float)) else None
 
         destination = packet.get("to")
         broadcast = (

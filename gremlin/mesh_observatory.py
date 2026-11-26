@@ -352,7 +352,7 @@ async function refreshHealth(){
 
   const services=[
    ['GREMLIN API',d.gremlin,'ONLINE'],
-   ['RADIO TCP',d.radio_tcp,'CONNECTED'],
+   ['RADIO LINK',d.radio_tcp,'CONNECTED'],
    ['WATCHDOG',d.watchdog,'RUNNING'],
    ['COLLECTOR',d.collector,'ACTIVE'],
    ['DATABASE',d.database,'READABLE'],
@@ -956,22 +956,7 @@ def system_health():
     bots = [bot] if bot else []
     watchdogs = [watchdog] if watchdog else []
 
-    tcp = False
-    for pid in bots:
-        try:
-            r = subprocess.run(
-                [shutil.which("lsof") or "/usr/sbin/lsof", "-nP", "-a",
-                 "-p", str(pid),
-                 "-iTCP@%s:%d" % (SETTINGS.radio_host, SETTINGS.radio_port),
-                 "-sTCP:ESTABLISHED"],
-                capture_output=True,
-                text=True, timeout=3
-            )
-            if r.returncode == 0 and "ESTABLISHED" in r.stdout:
-                tcp = True
-                break
-        except Exception:
-            pass
+    tcp = gremlin_settings.radio_connected(SETTINGS, bot)
 
     api = False
     gremlin_uptime = None
@@ -1063,7 +1048,7 @@ class Handler(BaseHTTPRequestHandler):
             node = args.get("node", ["ALL"])[0]
             now = int(time.time())
 
-            rf = "route IN ('DIRECT','RELAYED','RF UNKNOWN') AND rssi < 0"
+            rf = "route IN ('DIRECT','RELAYED','RF UNKNOWN')"
             where = rf
             params = []
 
@@ -1134,7 +1119,7 @@ class Handler(BaseHTTPRequestHandler):
                     "CREATE INDEX IF NOT EXISTS "
                     "directory_idx ON packets(node,timestamp)"
                 )
-                rf = "route IN ('DIRECT','RELAYED','RF UNKNOWN') AND rssi < 0"
+                rf = "route IN ('DIRECT','RELAYED','RF UNKNOWN')"
 
                 nodes = []
                 for row in db.execute(f"""
@@ -1180,7 +1165,7 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/rfdata":
             with database() as db:
                 db.row_factory = sqlite3.Row
-                rf = "route IN ('DIRECT','RELAYED','RF UNKNOWN') AND rssi < 0"
+                rf = "route IN ('DIRECT','RELAYED','RF UNKNOWN')"
                 valid = "node LIKE '!%' AND length(node)=9"
                 packets = [dict(r) for r in db.execute(
                     f"SELECT * FROM packets WHERE {rf} "

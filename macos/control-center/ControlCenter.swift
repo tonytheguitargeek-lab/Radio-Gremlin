@@ -93,7 +93,7 @@ class ControlCenter: NSObject, NSApplicationDelegate {
 
         divider()
 
-        status("Radio TCP", key: "radio")
+        status("Radio Link", key: "radio")
         status("Recovery Watchdog", key: "watchdog")
         status("Sleep Prevention", key: "sleep")
 
@@ -216,21 +216,14 @@ class ControlCenter: NSObject, NSApplicationDelegate {
 
     func refresh() {
         DispatchQueue.global(qos: .utility).async {
-            if self.radioAddress.isEmpty {
-                self.radioAddress = self.run(
-                    "cd \(self.quoted(self.gremlinDir.path)) && ./venv/bin/python -c " +
-                    "'import gremlin_settings as g; s=g.load(); print(\"%s:%d\" % (s.radio_host, s.radio_port))'"
-                ).trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-
             let bot = self.alive("gremlin")
             let obs = self.alive("observatory")
             let watchdog = self.alive("watchdog")
 
-            let radio = !self.radioAddress.hasPrefix(":") && !self.radioAddress.isEmpty && !self.run(
-                "lsof -nP -iTCP@\(self.radioAddress) -sTCP:ESTABLISHED"
-            ).isEmpty
-
+            let radio = self.run(
+                "cd \(self.quoted(self.gremlinDir.path)) && ./venv/bin/python -c " +
+                "'import gremlin_settings as g; print(1 if g.current_radio_connected() else 0)'"
+            ).trimmingCharacters(in: .whitespacesAndNewlines) == "1"
             let sleep = !self.run(
                 "launchctl list | awk '$3 == \"com.radiogremlin.caffeinate\" && $1 ~ /^[0-9]+$/ {print $1}'"
             ).isEmpty

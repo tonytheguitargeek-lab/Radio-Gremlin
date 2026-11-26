@@ -14,6 +14,9 @@ Values come from, in order of precedence:
 """
 import configparser
 import os
+import subprocess
+import shutil
+import stat
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -70,6 +73,15 @@ class Settings:
         host = cp.get("radio", "host").strip()
         port = cp.get("radio", "port").strip()
         ma_host, ma_port = _radio_from_meshing_around(self.root / "config.ini")
+        interface = configparser.ConfigParser(
+            interpolation=None, strict=False)
+        interface.read(self.root / "config.ini")
+        self.radio_type = interface.get(
+            "interface", "type", fallback="tcp"
+        ).strip().lower()
+        self.serial_port = interface.get(
+            "interface", "port", fallback=""
+        ).strip()
         self.radio_host = host or ma_host
         self.radio_port = int(port) if port.isdigit() else (ma_port or 4403)
 
@@ -104,3 +116,64 @@ def pid_alive(pid_file):
         return pid
     except (OSError, ValueError):
         return None
+
+
+def radio_description(settings):
+    if settings.radio_type == "serial":
+        return settings.serial_port
+    return "%s:%d" % (settings.radio_host, settings.radio_port)
+
+
+def radio_reachable(settings):
+    if settings.radio_type == "serial":
+        try:
+            return stat.S_ISCHR(
+                Path(settings.serial_port).stat().st_mode)
+        except OSError:
+            return False
+    if settings.radio_type != "tcp" or not settings.radio_host:
+        return False
+    import sys
+    wait = "1000" if sys.platform == "darwin" else "1"
+    try:
+        result = subprocess.run(
+            [shutil.which("ping") or "/sbin/ping",
+             "-c", "1", "-W", wait, settings.radio_host],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=3)
+        return result.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def radio_connected(settings, pid):
+    if not pid or int(pid) <= 0:
+        return False
+    cmd = [shutil.which("lsof") or "/usr/sbin/lsof",
+           "-nP", "-a", "-p", str(pid)]
+    if settings.radio_type == "serial":
+        if not radio_reachable(settings):
+            return False
+        cmd += ["--", settings.serial_port]
+    elif settings.radio_type == "tcp" and settings.radio_host:
+        cmd += [
+            "-iTCP@%s:%d" % (
+                settings.radio_host, settings.radio_port),
+            "-sTCP:ESTABLISHED"]
+    else:
+        return False
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True,
+            text=True, timeout=5)
+        return result.returncode == 0 and bool(
+            result.stdout.strip())
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def current_radio_connected():
+    settings = load()
+    pid = pid_alive(settings.pid_file("gremlin"))
+    return radio_connected(settings, pid)
